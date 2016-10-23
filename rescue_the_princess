@@ -1,0 +1,387 @@
+
+
+#include <iostream>
+#include <string>
+#include <queue>
+#include <vector>
+
+using namespace std;
+
+//return code
+typedef enum RET_CODE
+{
+	RTP_ERROR = -1,
+	RTP_OK,
+	RTP_NOTFOUND,
+	RTP_IMPOSSIBLE,
+	RTP_FOUND,
+	RTP_TIMEOUT
+}RET_CODE_E;
+
+
+
+//
+typedef enum DIRECTION
+{
+	RTP_UP = 0,
+	RTP_DOWN,
+	RTP_LEFT,
+	RTP_RIGHT,
+	RTP_SIZE
+}DIRECT_E;
+
+typedef enum SPACE_TYPE
+{
+	RTP_ROAD = 0,
+	RTP_WINDOW,
+	RTP_PRINCE,
+	RTP_PRINCESS
+}SPACE_TYPE_E;
+
+
+
+
+typedef struct space_info
+{
+	//坐标
+	int row;
+	int col;
+	//当前位置类型
+	enum SPACE_TYPE type;
+	//
+	int pass_by;
+	//前后左右四个
+	struct space_info* direct[4];
+}space_info_t;
+
+//多叉树和广度队列中的节点数据结构
+typedef struct q_node
+{
+	int level;
+	//当前node所包含的位置信息
+	space_info_t* space;
+	struct q_node* parent;
+	//是否经过
+	int pass_by;
+}q_node_t;
+
+space_info_t* get_around_space(space_info_t* maze[], int max_row, int max_col, space_info_t* cur_space, DIRECT_E direct)
+{
+	if (NULL == maze || NULL == cur_space)
+	{
+		return NULL;
+	}
+	int row = cur_space->row;;
+	int col = cur_space->col;
+	int idx = 0;
+	space_info_t* space = NULL;
+
+	switch (direct)
+	{
+	case RTP_UP:
+		if (row <= 0)
+		{
+			return NULL;
+		}
+		row--;
+		break;
+	case RTP_DOWN:
+		if (row >= max_row)
+		{
+			return NULL;
+		}
+		row++;
+		break;
+	case RTP_LEFT:
+		if (col <= 0)
+		{
+			return NULL;
+		}
+		col--;
+		break;
+	case RTP_RIGHT:
+		if (col >= max_col)
+		{
+			return NULL;
+		}
+		col++;
+		break;
+	default:
+		//不可能到这个地方
+		break;
+	}
+
+	idx = row * (max_col + 1) + col;
+	space = maze[idx];
+	if (RTP_WINDOW == space->type)
+	{
+		return NULL;
+	}
+	else
+	{
+		return space;
+	}
+}
+
+
+
+//将迷宫数据转换为数据结构
+//数据是一个M行N列的数据,并找到prince的位置节点
+//迷宫也是二维数组
+space_info_t* construct_maze(space_info_t* maze[], int M, int N, char* maze_data)
+{
+	int rows = M;
+	int cols = N;
+	space_info_t* prince = NULL;
+	space_info_t* pos = NULL;
+
+	for (int i = 0; i < rows; i++)
+	{
+		for (int j = 0; j < cols; j++)
+		{
+			int idx = i * cols + j;
+			char c = *(maze_data + idx);
+			pos = maze[idx];
+			//初始化sapce 结构信息
+			memset(pos, 0, sizeof(space_info_t));
+			maze[idx]->row = i;
+			maze[idx]->col = j;
+
+			switch (c)
+			{
+			case 'S':
+				prince = pos;
+				maze[idx]->type = RTP_PRINCE;
+				break;
+			case 'P':
+				maze[idx]->type = RTP_PRINCESS;
+				break;
+			case '.':
+				maze[idx]->type = RTP_ROAD;
+				break;
+			case '*':
+				maze[idx]->type = RTP_WINDOW;
+				break;
+			default:
+				return NULL;
+			}
+		}
+	}
+
+	for (int i = 0; i < rows; i++)
+	{
+		for (int j = 0; j < cols; j++)
+		{
+			int idx = i * cols + j;
+			maze[idx]->direct[RTP_UP]    = get_around_space(maze, M - 1, N - 1, maze[idx], RTP_UP);
+			maze[idx]->direct[RTP_DOWN]  = get_around_space(maze, M - 1, N - 1, maze[idx], RTP_DOWN);
+			maze[idx]->direct[RTP_LEFT]  = get_around_space(maze, M - 1, N - 1, maze[idx], RTP_LEFT);
+			maze[idx]->direct[RTP_RIGHT] = get_around_space(maze, M - 1, N - 1, maze[idx], RTP_RIGHT);
+		}
+	}
+	return prince;
+}
+
+
+
+void queue_push_back(queue<q_node_t*>& queue, int level, space_info_t* space, q_node_t* parent)
+{
+	q_node_t* new_qnode = new q_node_t();
+	if (NULL == space)
+	{
+		return;
+	}
+	new_qnode->level = level;
+	new_qnode->parent = parent;
+	new_qnode->space = space;
+	queue.push(new_qnode);
+}
+
+//广度遍历
+RET_CODE_E find_princess(queue<q_node_t*>& queue, space_info_t* prince, int& step)
+{
+	step = 0;
+	q_node_t* pos_node = NULL;
+	vector<q_node_t*> q_node_vect;
+	q_node_t* prince_node = new q_node_t();
+	if (NULL == prince_node)
+	{
+		return RTP_ERROR;
+	}
+	//第一个节点应该是prince
+	prince_node->level = 0;
+	prince_node->space = prince;
+	prince_node->parent = NULL;
+	//将第一个节点放入队列中
+	queue.push(prince_node);
+	
+	while (!queue.empty())
+	{
+		pos_node = queue.front();
+		space_info_t* cur_space = pos_node->space;
+		if (NULL == cur_space)
+		{//
+			cout << "the node in queue is empty! " << endl;
+			return RTP_ERROR;
+		}
+
+		if (RTP_PRINCESS == cur_space->type)
+		{
+			//如果找到了
+			q_node_t* tmp = pos_node;
+			/* we find princess :) */
+			while (tmp != NULL)
+			{		
+				cout << "( " << tmp->space->row << " , " << tmp->space->col<< " )";
+				tmp = tmp->parent;
+			}
+			cout << "" << endl;
+			step = pos_node->level;
+			return RTP_OK;
+		}
+		else if (RTP_ROAD == cur_space->type || RTP_PRINCE == cur_space->type)
+		{
+			space_info_t* tmp = NULL;
+			int cur_level = pos_node->level;
+			if (1 != cur_space->pass_by)
+			{
+				//如果之前没有经过，就设置为经过
+				cur_space->pass_by = 1;
+				/* 将其上下左右节点加入队列 */
+				tmp = cur_space->direct[RTP_UP];
+				queue_push_back(queue, pos_node->level + 1, tmp, pos_node);
+
+				tmp = cur_space->direct[RTP_DOWN];
+				queue_push_back(queue, pos_node->level + 1, tmp, pos_node);
+
+				tmp = cur_space->direct[RTP_LEFT];
+				queue_push_back(queue, pos_node->level + 1, tmp, pos_node);
+
+				tmp = cur_space->direct[RTP_RIGHT];
+				queue_push_back(queue, pos_node->level + 1, tmp, pos_node);
+			}
+			queue.pop();
+			continue;
+		}
+		else
+		{
+			cout << "this can not  happy" << endl;
+		}
+	}
+	if (0 != q_node_vect.size())
+	{
+		for (int i = 0; i < q_node_vect.size();i++)
+		{
+			delete q_node_vect[i];
+		}
+	}
+
+	return RTP_NOTFOUND;
+}
+
+
+
+RET_CODE_E save_princess(int M, int N, char* maze_data, int time)
+{
+	RET_CODE_E ret = RTP_ERROR;
+	space_info_t* prince = NULL;
+	queue<q_node_t*> queue;
+	int step = 0;
+	int time_need = 0;
+
+	if (M <= 1 || N <= 1 || NULL == maze_data || 0 == time)
+	{
+		return RTP_ERROR;
+	}
+
+	space_info_t** maze = new space_info_t*[M*N];
+	if (NULL == maze)
+	{
+		return RTP_IMPOSSIBLE;
+	}
+	for (int i = 0; i < M*N; i++)
+	{
+		maze[i] = new space_info_t();
+		if (NULL == maze[i])
+		{
+			return RTP_ERROR;
+		}
+	}
+	//初始化迷宫maze
+	prince = construct_maze(maze, M, N, maze_data);
+	if (NULL == prince)/*输入数据有误*/
+	{
+		return RTP_IMPOSSIBLE;
+	}
+	//找到公主
+	ret = find_princess(queue, prince, step);
+	for (int i = 0; i < M*N; i++)
+	{
+		delete maze[i];
+		maze[i] = NULL;
+	}
+	delete[] maze;
+	cout << endl << " " << step << " ， " << time << endl;
+	if (0 != queue.size())
+	{
+		q_node_t* tmp = queue.front();
+		queue.pop();
+		delete tmp;
+	}
+	if (0 == step)
+	{
+		return RTP_ERROR;
+	}
+	else if (step > time)
+	{
+		return RTP_TIMEOUT;
+	}
+	else
+	{
+		return RTP_FOUND;
+	}
+}
+
+int main()
+{
+	RET_CODE_E ret = RTP_ERROR;
+	int rows = 10;
+	int cols = 10;
+
+	char maze_info[10][10] = { \
+		/*      0    1    2    3    4    5    6    7    8    9*/
+		/*0*/ {'.', '.', '.', '*', '.', '.', '.', '.', '.', '.'},
+		/*1*/{ '.', 'S', '*', '.', '.', '.', '.', '.', '.', '.' },
+		/*2*/{ '.', '.', '*', '.', '.', '.', '.', '.', '.', '.' },
+		/*3*/{ '.', '.', '*', '*', '.', '*', '.', '.', '.', '.' },
+		/*4*/{ '.', '.', '.', '*', '.', '*', '.', '.', '.', '.' },
+		/*5*/{ '.', '.', '.', '*', '.', '.', '.', '.', '.', '.' },
+		/*6*/{ '.', '.', '*', '.', '.', '.', '.', '.', '.', '.' },
+		/*7*/{ '.', '.', '*', '.', '*', '.', '*', '.', '.', '.' },
+		/*8*/{ '.', '.', '.', '.', '*', '.', '*', '*', '*', '.' },
+		/*9*/{ '.', '.', '*', '.', '*', '.', '*', 'P', '.', '.' } };
+	cout << " "<<endl;
+
+	for (int i = 0; i < cols; i++)
+	{
+		cout << " " << i ;
+	}
+	cout << " " <<endl;
+
+	for (int i = 0; i < rows; i++)
+	{
+		cout << i;
+		for (int j = 0; j < cols; j++)
+		{
+			cout << " " << maze_info[i][j];
+		}
+		cout <<""<< endl;
+	}
+	int M = rows;
+	int N = cols;
+	ret = save_princess(M, N, (char*)maze_info, 6);
+
+	return (int)ret;
+}
+
+
